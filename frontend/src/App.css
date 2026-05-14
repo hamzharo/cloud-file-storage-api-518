@@ -1,25 +1,42 @@
+/*
+  Global body style
+  Applies to the whole page
+*/
 body {
   margin: 0;
   font-family: Arial, sans-serif;
   background-color: #f4f6f8;
 }
 
+/*
+  Main app container
+*/
 .app {
   max-width: 900px;
   margin: 40px auto;
   padding: 20px;
 }
 
+/*
+  Main title
+*/
 h1 {
   text-align: center;
   color: #222;
 }
 
+/*
+  Subtitle under main title
+*/
 .app > p {
   text-align: center;
   color: #555;
 }
 
+/*
+  White card container
+  Used for upload section and file list section
+*/
 .card {
   background: white;
   padding: 20px;
@@ -28,10 +45,16 @@ h1 {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+/*
+  File input spacing
+*/
 input {
   margin-right: 10px;
 }
 
+/*
+  Buttons and links share similar style
+*/
 button,
 a {
   padding: 8px 12px;
@@ -45,22 +68,53 @@ a {
   font-size: 14px;
 }
 
+/*
+  Hover effect for buttons and links
+*/
 button:hover,
 a:hover {
   background-color: #1d4ed8;
 }
 
+/*
+  Disabled button style
+*/
 button:disabled {
   background-color: #999;
   cursor: not-allowed;
 }
 
+/*
+  Delete button has red color
+*/
+.delete-button {
+  background-color: #dc2626;
+}
+
+.delete-button:hover {
+  background-color: #b91c1c;
+}
+
+/*
+  Message text
+*/
+.message {
+  color: #2563eb;
+  font-weight: bold;
+}
+
+/*
+  File list container
+*/
 .file-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
+/*
+  Individual file card
+*/
 .file-item {
   display: flex;
   justify-content: space-between;
@@ -71,13 +125,33 @@ button:disabled {
   border: 1px solid #ddd;
 }
 
-.file-item p {
+/*
+  File information text
+*/
+.file-info p {
   margin: 4px 0;
   color: #555;
 }
 
+/*
+  Action buttons container
+*/
 .actions {
   display: flex;
   gap: 5px;
   flex-wrap: wrap;
+}
+
+/*
+  Small screen layout
+*/
+@media (max-width: 700px) {
+  .file-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .actions {
+    margin-top: 10px;
+  }
 }
