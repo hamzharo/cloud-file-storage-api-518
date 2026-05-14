@@ -1,92 +1,44 @@
-// Import Express to create API routes
 const express = require("express");
-
-// Import multer
-// Multer is used to handle file uploads from the frontend
 const multer = require("multer");
-
-// Import Supabase client
-// This allows our backend to communicate with Supabase Storage
 const { createClient } = require("@supabase/supabase-js");
-
-// Import uuid
-// UUID creates unique IDs for files so filenames do not conflict
 const { v4: uuidv4 } = require("uuid");
-
-// Import file system module
-// fs is used to read and write the local JSON metadata file
 const fs = require("fs");
-
-// Import path module
-// path helps create safe file paths
 const path = require("path");
 
-// Create an Express router
 const router = express.Router();
 
 /*
   Supabase setup
-
-  SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_BUCKET
-  are stored in the .env file.
-
-  Example .env:
-
-  PORT=5001
-  SUPABASE_URL=https://your-project.supabase.co
-  SUPABASE_ANON_KEY=your_publishable_key
-  SUPABASE_BUCKET=files
 */
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
 );
 
-// Bucket name from .env
-// If not found, default to "files"
 const bucketName = process.env.SUPABASE_BUCKET || "files";
 
 /*
   Multer setup
-
-  We are using memoryStorage.
-  This means the uploaded file is temporarily kept in memory,
-  then sent directly to Supabase Storage.
-
-  We are NOT saving the uploaded file permanently in local backend/uploads.
+  We keep the file in memory before sending it to Supabase.
 */
 const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
-
-  // File size limit: 10 MB
-  // This prevents users from uploading very large files
   limits: {
-    fileSize: 10 * 1024 * 1024,
+    fileSize: 10 * 1024 * 1024, // 10 MB limit
   },
 });
 
 /*
-  Metadata file
-
-  Supabase stores the actual uploaded files.
-  This local JSON file stores file information such as:
-  - file id
-  - original file name
-  - file type
-  - file size
-  - Supabase storage path
-  - public URL
-  - upload date
+  Local JSON metadata file.
+  Supabase stores the actual file.
+  files.json stores file information.
 */
 const dataFilePath = path.join(__dirname, "../data/files.json");
 
 /*
-  Helper function: readFilesData()
-
-  This function reads all file metadata from files.json.
-  If files.json does not exist, it creates an empty JSON array.
+  Read file metadata from files.json.
 */
 function readFilesData() {
   if (!fs.existsSync(dataFilePath)) {
@@ -94,80 +46,50 @@ function readFilesData() {
   }
 
   const data = fs.readFileSync(dataFilePath, "utf8");
-
-  // If the file is empty, return an empty array
   return JSON.parse(data || "[]");
 }
 
 /*
-  Helper function: writeFilesData()
-
-  This function saves updated file metadata back to files.json.
+  Write file metadata to files.json.
 */
 function writeFilesData(files) {
   fs.writeFileSync(dataFilePath, JSON.stringify(files, null, 2));
 }
 
 /*
-  TEST ROUTE
+  Helper function to find one file by ID.
+*/
+function findFileById(id) {
+  const files = readFilesData();
+  return files.find((file) => file.id === id);
+}
 
-  Method: GET
-  URL: /api/files/test
-
-  Purpose:
-  Used to check if the backend file API is working.
+/*
+  Test route
 */
 router.get("/test", (req, res) => {
   res.json({ message: "File API is working" });
 });
 
 /*
-  UPLOAD FILE API
+  Upload file API
 
-  Method: POST
-  URL: /api/files/upload
-
-  Frontend sends:
-  - form-data
-  - key name must be "file"
-
-  What this API does:
-  1. Receives the uploaded file from frontend
-  2. Creates a unique file name
-  3. Uploads the file to Supabase Storage
-  4. Gets the public URL from Supabase
-  5. Saves file metadata in files.json
-  6. Returns success response
+  POST /api/files/upload
 */
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    // Check if the frontend actually sent a file
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" });
     }
 
-    // Create a unique ID for the file
     const fileId = uuidv4();
-
-    // Original file name uploaded by the user
     const originalName = req.file.originalname;
-
-    // Get file extension, for example: .png, .pdf, .txt
     const fileExtension = path.extname(originalName);
-
-    // Create a unique stored file name
-    // Example: 1234abcd.png
     const storedName = `${fileId}${fileExtension}`;
-
-    // Path inside Supabase bucket
-    // The file will be stored under uploads/
     const filePath = `uploads/${storedName}`;
 
     /*
-      Upload file to Supabase Storage
-
-      req.file.buffer contains the uploaded file data.
-      req.file.mimetype stores the file type, such as image/png or application/pdf.
+      Upload file to Supabase Storage.
     */
     const { error } = await supabase.storage
       .from(bucketName)
@@ -176,7 +98,6 @@ router.post("/upload", upload.single("file"), async (req, res) => {
         upsert: false,
       });
 
-    // If Supabase returns an error, stop and send error response
     if (error) {
       console.error("Supabase upload error:", error);
 
@@ -187,23 +108,12 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     }
 
     /*
-      Get public URL
-
-      Because this prototype uses a public bucket,
-      the file can be opened using this public URL.
-
-      For a real secure production system, signed URLs would be better.
+      Get public URL for viewing.
     */
     const { data: publicUrlData } = supabase.storage
       .from(bucketName)
       .getPublicUrl(filePath);
 
-    /*
-      Create metadata record
-
-      This record is saved locally in files.json.
-      The actual file is stored in Supabase Storage.
-    */
     const fileRecord = {
       id: fileId,
       originalName,
@@ -215,16 +125,10 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       uploadDate: new Date().toISOString(),
     };
 
-    // Read current file metadata
     const files = readFilesData();
-
-    // Add the new file record
     files.push(fileRecord);
-
-    // Save updated metadata
     writeFilesData(files);
 
-    // Return success response to frontend
     res.status(201).json({
       message: "File uploaded successfully",
       file: fileRecord,
@@ -240,14 +144,9 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 /*
-  GET ALL FILES API
+  Get all files API
 
-  Method: GET
-  URL: /api/files
-
-  Purpose:
-  Returns all uploaded file metadata from files.json.
-  The frontend uses this to display the file list.
+  GET /api/files
 */
 router.get("/", (req, res) => {
   const files = readFilesData();
@@ -255,36 +154,144 @@ router.get("/", (req, res) => {
 });
 
 /*
-  VIEW FILE API
+  Public receiver page
 
-  Method: GET
-  URL: /api/files/view/:id
+  GET /api/files/public/:id
 
-  Purpose:
-  Opens the file in the browser using its public Supabase URL.
+  This is the link that will be shared with another person.
+  The receiver can choose either:
+  - View File
+  - Download File
+*/
+router.get("/public/:id", (req, res) => {
+  try {
+    const file = findFileById(req.params.id);
 
-  Works well for:
-  - images
-  - PDFs
-  - text files
+    if (!file) {
+      return res.status(404).send(`
+        <html>
+          <body>
+            <h2>File not found</h2>
+            <p>The file may have been deleted or the link is incorrect.</p>
+          </body>
+        </html>
+      `);
+    }
 
-  Some file types, like .docx or .zip, may download instead.
-  That depends on the browser.
+    const viewUrl = `/api/files/view/${file.id}`;
+    const downloadUrl = `/api/files/download/${file.id}`;
+
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Shared File</title>
+
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f6f8;
+            margin: 0;
+            padding: 0;
+          }
+
+          .container {
+            max-width: 600px;
+            margin: 80px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+          }
+
+          h1 {
+            color: #222;
+          }
+
+          p {
+            color: #555;
+            word-break: break-word;
+          }
+
+          .buttons {
+            margin-top: 25px;
+          }
+
+          a {
+            display: inline-block;
+            margin: 8px;
+            padding: 10px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            color: white;
+            background-color: #2563eb;
+          }
+
+          a:hover {
+            background-color: #1d4ed8;
+          }
+
+          .download {
+            background-color: #16a34a;
+          }
+
+          .download:hover {
+            background-color: #15803d;
+          }
+        </style>
+      </head>
+
+      <body>
+        <div class="container">
+          <h1>Shared File</h1>
+
+          <p><strong>File Name:</strong> ${file.originalName}</p>
+          <p><strong>File Type:</strong> ${file.fileType}</p>
+
+          <div class="buttons">
+            <a href="${viewUrl}" target="_blank">View File</a>
+            <a href="${downloadUrl}" class="download">Download File</a>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error("Public page error:", error);
+
+    res.status(500).send(`
+      <html>
+        <body>
+          <h2>Server error</h2>
+          <p>Something went wrong while opening the shared file.</p>
+        </body>
+      </html>
+    `);
+  }
+});
+
+/*
+  View file API
+
+  GET /api/files/view/:id
+
+  This opens the file in the browser.
 */
 router.get("/view/:id", (req, res) => {
   try {
-    // Read all file metadata
-    const files = readFilesData();
+    const file = findFileById(req.params.id);
 
-    // Find the file with the matching ID
-    const file = files.find((f) => f.id === req.params.id);
-
-    // If no file is found, return 404
     if (!file) {
       return res.status(404).json({ message: "File not found" });
     }
 
-    // Redirect the browser to the Supabase public URL
+    /*
+      Redirect to Supabase public URL.
+      This allows image, PDF, and text files to open in the browser.
+    */
     res.redirect(file.publicUrl);
   } catch (error) {
     console.error("View error:", error);
@@ -297,32 +304,56 @@ router.get("/view/:id", (req, res) => {
 });
 
 /*
-  DOWNLOAD FILE API
+  Download file API
 
-  Method: GET
-  URL: /api/files/download/:id
+  GET /api/files/download/:id
 
-  Purpose:
-  Redirects the user to the Supabase public URL.
-
-  In this simple version, view and download are similar.
-  The browser decides whether to preview or download the file.
+  This downloads the file instead of only opening it.
 */
-router.get("/download/:id", (req, res) => {
+router.get("/download/:id", async (req, res) => {
   try {
-    // Read all file metadata
-    const files = readFilesData();
+    const file = findFileById(req.params.id);
 
-    // Find file by ID
-    const file = files.find((f) => f.id === req.params.id);
-
-    // If file does not exist, return 404
     if (!file) {
       return res.status(404).json({ message: "File not found" });
     }
 
-    // Redirect user to the Supabase public URL
-    res.redirect(file.publicUrl);
+    /*
+      Download file from Supabase Storage.
+      This gives the backend the actual file content.
+    */
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .download(file.storagePath);
+
+    if (error) {
+      console.error("Supabase download error:", error);
+
+      return res.status(500).json({
+        message: "Failed to download file from Supabase",
+        error: error.message,
+      });
+    }
+
+    /*
+      Convert Supabase file data into a Node.js Buffer.
+    */
+    const arrayBuffer = await data.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    /*
+      Set headers to force browser download.
+    */
+    res.setHeader("Content-Type", file.fileType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${file.originalName}"`
+    );
+
+    /*
+      Send file content to the browser.
+    */
+    res.send(buffer);
   } catch (error) {
     console.error("Download error:", error);
 
@@ -334,35 +365,35 @@ router.get("/download/:id", (req, res) => {
 });
 
 /*
-  SHARE FILE API
+  Share file API
 
-  Method: GET
-  URL: /api/files/share/:id
+  GET /api/files/share/:id
 
-  Purpose:
-  Returns a shareable public link for the file.
-
-  Since this prototype does not use login/register,
-  anyone with the share link can open the file.
+  This returns a receiver page link, not just the raw Supabase file URL.
 */
 router.get("/share/:id", (req, res) => {
   try {
-    // Read all file metadata
-    const files = readFilesData();
+    const file = findFileById(req.params.id);
 
-    // Find file by ID
-    const file = files.find((f) => f.id === req.params.id);
-
-    // If file does not exist, return 404
     if (!file) {
       return res.status(404).json({ message: "File not found" });
     }
 
-    // Return share link
+    /*
+      This is the link the sender shares with another person.
+
+      Receiver opens this page and sees:
+      - View File
+      - Download File
+    */
+    const sharePageLink = `${req.protocol}://${req.get("host")}/api/files/public/${file.id}`;
+
     res.json({
       message: "Share link generated successfully",
       fileName: file.originalName,
-      shareLink: file.publicUrl,
+      shareLink: sharePageLink,
+      viewLink: `${req.protocol}://${req.get("host")}/api/files/view/${file.id}`,
+      downloadLink: `${req.protocol}://${req.get("host")}/api/files/download/${file.id}`,
     });
   } catch (error) {
     console.error("Share error:", error);
@@ -375,40 +406,26 @@ router.get("/share/:id", (req, res) => {
 });
 
 /*
-  DELETE FILE API
+  Delete file API
 
-  Method: DELETE
-  URL: /api/files/:id
-
-  Purpose:
-  Deletes a file from:
-  1. Supabase Storage
-  2. Local files.json metadata
+  DELETE /api/files/:id
 */
 router.delete("/:id", async (req, res) => {
   try {
-    // Read all file metadata
     const files = readFilesData();
-
-    // Find the file to delete
     const file = files.find((f) => f.id === req.params.id);
 
-    // If file does not exist, return 404
     if (!file) {
       return res.status(404).json({ message: "File not found" });
     }
 
     /*
-      Delete file from Supabase Storage
-
-      file.storagePath looks like:
-      uploads/unique-file-name.png
+      Delete the actual file from Supabase Storage.
     */
     const { error } = await supabase.storage
       .from(bucketName)
       .remove([file.storagePath]);
 
-    // If Supabase deletion fails, return error
     if (error) {
       console.error("Supabase delete error:", error);
 
@@ -418,13 +435,12 @@ router.delete("/:id", async (req, res) => {
       });
     }
 
-    // Remove the file record from files.json
+    /*
+      Remove file metadata from files.json.
+    */
     const updatedFiles = files.filter((f) => f.id !== req.params.id);
-
-    // Save updated metadata
     writeFilesData(updatedFiles);
 
-    // Return success response
     res.json({
       message: "File deleted successfully",
       deletedFile: file.originalName,
@@ -439,5 +455,4 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// Export router so server.js can use it
 module.exports = router;
